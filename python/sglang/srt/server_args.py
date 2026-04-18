@@ -479,6 +479,7 @@ class ServerArgs:
     speculative_moe_runner_backend: Optional[str] = None
     speculative_moe_a2a_backend: Optional[str] = None
     speculative_draft_model_quantization: Optional[str] = None
+    dflash_student_mode: Literal["no-verify", "verify"] = "no-verify"
 
     # Speculative decoding (ngram)
     speculative_ngram_min_match_window_size: int = 1
@@ -2499,6 +2500,57 @@ class ServerArgs:
                     "Currently ngram speculative decoding does not support dp attention."
                 )
 
+        if self.speculative_algorithm == "DFLASH_STUDENT":
+            if self.speculative_draft_model_path is None:
+                raise ValueError(
+                    "DFLASH_STUDENT requires --speculative-draft-model-path pointing to "
+                    "the DFlash draft model checkpoint."
+                )
+            if self.dflash_student_mode not in ("no-verify", "verify"):
+                raise ValueError(
+                    "DFLASH_STUDENT requires dflash_student_mode to be one of "
+                    "['no-verify', 'verify']."
+                )
+            if self.speculative_num_draft_tokens is None:
+                from sglang.srt.configs.model_config import ModelConfig
+                from sglang.srt.speculative.dflash_utils import (
+                    parse_dflash_draft_config,
+                )
+
+                draft_model_config_kwargs = {
+                    "model_path": self.speculative_draft_model_path,
+                    "is_draft_model": True,
+                }
+                if self.speculative_draft_model_revision is not None:
+                    draft_model_config_kwargs["model_revision"] = (
+                        self.speculative_draft_model_revision
+                    )
+                draft_model_config = ModelConfig.from_server_args(
+                    self,
+                    **draft_model_config_kwargs,
+                )
+                draft_cfg = parse_dflash_draft_config(
+                    draft_hf_config=draft_model_config.hf_config
+                )
+                resolved_block_size = draft_cfg.resolve_block_size(default=16)
+                if resolved_block_size is None:
+                    raise ValueError(
+                        "DFLASH_STUDENT could not resolve speculative_num_draft_tokens "
+                        "from the draft config."
+                    )
+                self.speculative_num_draft_tokens = int(resolved_block_size)
+            if self.max_running_requests is None:
+                self.max_running_requests = 16
+                logger.warning(
+                    "Max running requests is reset to 16 for DFLASH_STUDENT speculative decoding."
+                )
+            self.disable_overlap_schedule = True
+            if self.enable_mixed_chunk:
+                self.enable_mixed_chunk = False
+                logger.warning(
+                    "Mixed chunked prefill is disabled for DFLASH_STUDENT speculative decoding."
+                )
+
     def _handle_load_format(self):
         if (
             self.load_format == "auto" or self.load_format == "gguf"
@@ -3924,7 +3976,7 @@ class ServerArgs:
         parser.add_argument(
             "--speculative-algorithm",
             type=str,
-            choices=["EAGLE", "EAGLE3", "NEXTN", "STANDALONE", "NGRAM"],
+            choices=["EAGLE", "EAGLE3", "NEXTN", "STANDALONE", "NGRAM", "DFLASH_STUDENT"],
             help="Speculative algorithm.",
         )
         parser.add_argument(
@@ -3967,6 +4019,13 @@ class ServerArgs:
             type=int,
             help="The number of tokens sampled from the draft model in Speculative Decoding.",
             default=ServerArgs.speculative_num_draft_tokens,
+        )
+        parser.add_argument(
+            "--dflash-student-mode",
+            type=str,
+            choices=["no-verify", "verify"],
+            default=ServerArgs.dflash_student_mode,
+            help="DFLASH_STUDENT mode: always-accept block rollout or standard target verification.",
         )
         parser.add_argument(
             "--speculative-accept-threshold-single",

@@ -342,6 +342,8 @@ class ModelRunner(ModelRunnerKVCacheMixin):
         self.remote_instance_transfer_engine_weight_info = None
         # auxiliary hidden capture mode. TODO: expose this to server args?
         self.eagle_use_aux_hidden_state = False
+        self.dflash_use_aux_hidden_state = False
+        self.dflash_target_layer_ids = None
         if self.spec_algorithm.is_eagle3() and not self.is_draft_worker:
             # load draft config
             draft_model_config = ModelConfig.from_server_args(
@@ -366,6 +368,26 @@ class ModelRunner(ModelRunnerKVCacheMixin):
             except:
                 # if there is no aux layer, set to None
                 self.eagle_aux_hidden_state_layer_ids = None
+
+        if self.spec_algorithm.is_dflash_student() and not self.is_draft_worker:
+            from sglang.srt.speculative.dflash_utils import parse_dflash_draft_config
+
+            draft_model_config = ModelConfig.from_server_args(
+                server_args,
+                model_path=server_args.speculative_draft_model_path,
+                model_revision=server_args.speculative_draft_model_revision,
+                is_draft_model=True,
+            )
+            draft_cfg = parse_dflash_draft_config(
+                draft_hf_config=draft_model_config.hf_config
+            )
+            target_num_layers = self.model_config.hf_config.num_hidden_layers
+            draft_num_layers = draft_cfg.num_hidden_layers or target_num_layers
+            self.dflash_target_layer_ids = draft_cfg.resolve_target_layer_ids(
+                target_num_layers=target_num_layers,
+                draft_num_layers=draft_num_layers,
+            )
+            self.dflash_use_aux_hidden_state = True
 
         # Apply the rank zero filter to logger
         if server_args.show_time_cost:
@@ -622,6 +644,9 @@ class ModelRunner(ModelRunnerKVCacheMixin):
             self.model.set_eagle3_layers_to_capture(
                 self.eagle_aux_hidden_state_layer_ids
             )
+
+        if self.dflash_use_aux_hidden_state and self.dflash_target_layer_ids is not None:
+            self.model.set_dflash_layers_to_capture(self.dflash_target_layer_ids)
 
         # Initialize piecewise CUDA graph
         self.init_piecewise_cuda_graphs()
@@ -1851,6 +1876,7 @@ class ModelRunner(ModelRunnerKVCacheMixin):
             self.spec_algorithm.is_eagle()
             or self.spec_algorithm.is_standalone()
             or self.spec_algorithm.is_ngram()
+            or self.spec_algorithm.is_dflash_student()
         ):
             return not self.is_draft_worker
 
@@ -1885,6 +1911,7 @@ class ModelRunner(ModelRunnerKVCacheMixin):
             self.spec_algorithm.is_eagle()
             or self.spec_algorithm.is_standalone()
             or self.spec_algorithm.is_ngram()
+            or self.spec_algorithm.is_dflash_student()
         ):
             if self.is_draft_worker:
                 raise RuntimeError("This should not happen")
@@ -1992,7 +2019,10 @@ class ModelRunner(ModelRunnerKVCacheMixin):
 
         def get_spec_info():
             spec_info = None
-            if self.spec_algorithm.is_eagle() or self.spec_algorithm.is_standalone():
+            if (
+                self.spec_algorithm.is_eagle()
+                or self.spec_algorithm.is_standalone()
+            ):
                 from sglang.srt.speculative.eagle_info import EagleVerifyInput
 
                 if self.is_draft_worker:
@@ -2027,6 +2057,20 @@ class ModelRunner(ModelRunnerKVCacheMixin):
                     draft_token_num=num_tokens_per_bs,
                 )
                 spec_info.capture_hidden_mode = CaptureHiddenMode.NULL
+            elif self.spec_algorithm.is_dflash_student():
+                from sglang.srt.speculative.dflash_student_info import (
+                    DFlashStudentVerifyInput,
+                )
+
+                if self.is_draft_worker:
+                    raise RuntimeError("This should not happen")
+                spec_info = DFlashStudentVerifyInput(
+                    draft_token=None,
+                    positions=None,
+                    draft_token_num=num_tokens_per_bs,
+                    custom_mask=buffers.custom_mask,
+                    capture_hidden_mode=CaptureHiddenMode.FULL,
+                )
 
             return spec_info
 

@@ -19,6 +19,7 @@ class SpeculativeAlgorithm(Enum):
     EAGLE3 = auto()
     STANDALONE = auto()
     NGRAM = auto()
+    DFLASH_STUDENT = auto()
     NONE = auto()
 
     @classmethod
@@ -45,6 +46,9 @@ class SpeculativeAlgorithm(Enum):
 
     def is_ngram(self) -> bool:
         return self == SpeculativeAlgorithm.NGRAM
+
+    def is_dflash_student(self) -> bool:
+        return self == SpeculativeAlgorithm.DFLASH_STUDENT
 
     def supports_spec_v2(self) -> bool:
         return self.is_eagle() or self.is_standalone()
@@ -101,6 +105,17 @@ class SpeculativeAlgorithm(Enum):
             from sglang.srt.speculative.ngram_worker import NGRAMWorker
 
             return NGRAMWorker
+        elif self.is_dflash_student():
+            if enable_overlap:
+                raise ValueError(
+                    f"Speculative algorithm {self.name} does not support overlap worker creation."
+                )
+
+            from sglang.srt.speculative.dflash_student_worker import (
+                DFlashStudentWorker,
+            )
+
+            return DFlashStudentWorker
 
         raise ValueError("Unreachable code path in create_worker.")
 
@@ -111,6 +126,8 @@ class SpecInputType(IntEnum):
     EAGLE_DRAFT = auto()
     EAGLE_VERIFY = auto()
     NGRAM_VERIFY = auto()
+    DFLASH_STUDENT_DRAFT = auto()
+    DFLASH_STUDENT_VERIFY = auto()
 
 
 class SpecInput(ABC):
@@ -120,12 +137,16 @@ class SpecInput(ABC):
     def is_draft_input(self) -> bool:
         # FIXME: remove this function which is only used for assertion
         # or use another variable name like `draft_input` to substitute `spec_info`
-        return self.spec_input_type == SpecInputType.EAGLE_DRAFT
+        return self.spec_input_type in {
+            SpecInputType.EAGLE_DRAFT,
+            SpecInputType.DFLASH_STUDENT_DRAFT,
+        }
 
     def is_verify_input(self) -> bool:
         return self.spec_input_type in {
             SpecInputType.EAGLE_VERIFY,
             SpecInputType.NGRAM_VERIFY,
+            SpecInputType.DFLASH_STUDENT_VERIFY,
         }
 
     @abstractmethod

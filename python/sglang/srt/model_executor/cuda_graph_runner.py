@@ -280,6 +280,7 @@ class CudaGraphRunner:
             model_runner.spec_algorithm.is_eagle()
             or model_runner.spec_algorithm.is_standalone()
             or model_runner.spec_algorithm.is_ngram()
+            or model_runner.spec_algorithm.is_dflash_student()
         ):
             if self.model_runner.is_draft_worker:
                 raise RuntimeError("This should not happen")
@@ -388,6 +389,7 @@ class CudaGraphRunner:
                 max(forward_batch.global_num_tokens_cpu) // self.num_tokens_per_bs
                 if self.model_runner.spec_algorithm.is_eagle()
                 or self.model_runner.spec_algorithm.is_standalone()
+                or self.model_runner.spec_algorithm.is_dflash_student()
                 else max(forward_batch.global_num_tokens_cpu)
             )
         else:
@@ -438,6 +440,7 @@ class CudaGraphRunner:
                 == forward_batch.input_ids.numel()
             )
             if self.model_runner.spec_algorithm.is_ngram()
+            or self.model_runner.spec_algorithm.is_dflash_student()
             else True
         )
 
@@ -928,6 +931,18 @@ class CudaGraphRunner:
                 draft_token_num=self.num_tokens_per_bs,
             )
             spec_info.capture_hidden_mode = CaptureHiddenMode.NULL
+        elif self.model_runner.spec_algorithm.is_dflash_student():
+            from sglang.srt.speculative.dflash_student_info import (
+                DFlashStudentVerifyInput,
+            )
+
+            spec_info = DFlashStudentVerifyInput(
+                draft_token=None,
+                positions=None,
+                draft_token_num=self.num_tokens_per_bs,
+                custom_mask=self.buffers.custom_mask,
+                capture_hidden_mode=CaptureHiddenMode.FULL,
+            )
 
         return spec_info
 

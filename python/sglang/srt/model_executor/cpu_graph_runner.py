@@ -609,6 +609,7 @@ class CPUGraphRunner:
         if (
             self.model_runner.spec_algorithm.is_eagle()
             or self.model_runner.spec_algorithm.is_standalone()
+            or self.model_runner.spec_algorithm.is_dflash_student()
         ):
             from sglang.srt.speculative.eagle_info import EagleVerifyInput
 
@@ -630,6 +631,18 @@ class CPUGraphRunner:
                     seq_lens_sum=None,
                     seq_lens_cpu=None,
                 )
+        elif self.model_runner.spec_algorithm.is_dflash_student():
+            from sglang.srt.speculative.dflash_student_info import (
+                DFlashStudentVerifyInput,
+            )
+
+            spec_info = DFlashStudentVerifyInput(
+                draft_token=None,
+                positions=None,
+                draft_token_num=self.model_runner.server_args.speculative_num_draft_tokens,
+                custom_mask=self.custom_mask,
+                capture_hidden_mode=CaptureHiddenMode.FULL,
+            )
 
         return spec_info
 

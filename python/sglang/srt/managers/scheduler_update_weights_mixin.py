@@ -42,6 +42,10 @@ logger = logging.getLogger(__name__)
 
 
 class SchedulerUpdateWeightsMixin:
+    def _get_weight_update_worker(self: "Scheduler"):
+        if self.spec_algorithm.is_dflash_student() and self.draft_worker is not None:
+            return self.draft_worker
+        return self.tp_worker
 
     def update_weights_from_disk(
         self: Scheduler, recv_req: UpdateWeightFromDiskReqInput
@@ -60,14 +64,18 @@ class SchedulerUpdateWeightsMixin:
         self: Scheduler, recv_req: InitWeightsUpdateGroupReqInput
     ):
         """Initialize the online model parameter update group."""
-        success, message = self.tp_worker.init_weights_update_group(recv_req)
+        success, message = self._get_weight_update_worker().init_weights_update_group(
+            recv_req
+        )
         return InitWeightsUpdateGroupReqOutput(success, message)
 
     def destroy_weights_update_group(
         self: Scheduler, recv_req: DestroyWeightsUpdateGroupReqInput
     ):
         """Destroy the online model parameter update group."""
-        success, message = self.tp_worker.destroy_weights_update_group(recv_req)
+        success, message = self._get_weight_update_worker().destroy_weights_update_group(
+            recv_req
+        )
         return DestroyWeightsUpdateGroupReqOutput(success, message)
 
     def update_weights_from_distributed(
@@ -75,7 +83,9 @@ class SchedulerUpdateWeightsMixin:
         recv_req: UpdateWeightsFromDistributedReqInput,
     ) -> Tuple[bool, str]:
         """Update the online model parameter."""
-        success, message = self.tp_worker.update_weights_from_distributed(recv_req)
+        success, message = self._get_weight_update_worker().update_weights_from_distributed(
+            recv_req
+        )
         if success:
             if recv_req.flush_cache:
                 flush_cache_success = self.flush_cache()
@@ -88,7 +98,7 @@ class SchedulerUpdateWeightsMixin:
         self: Scheduler, recv_req: UpdateWeightsFromTensorReqInput
     ):
         """Update the online model parameter from tensors."""
-        worker = self.draft_worker or self.tp_worker
+        worker = self._get_weight_update_worker()
         success, message = worker.update_weights_from_tensor(recv_req)
         # TODO extract common code b/t update_weights_from_distributed and update_weights_from_tensor later
         if success:
